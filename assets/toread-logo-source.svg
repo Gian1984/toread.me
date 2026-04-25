@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <circle cx="512" cy="512" r="442" fill="none" stroke="#ff5a35" stroke-width="64"/>
+  <circle cx="512" cy="512" r="374" fill="none" stroke="#ffcf23" stroke-width="72"/>
+  <path d="M105 466C92 355 143 217 265 137" fill="none" stroke="#ff5a35" stroke-width="14" stroke-linecap="round"/>
+  <path d="M73 491C67 369 124 202 281 111" fill="none" stroke="#ff5a35" stroke-width="9" stroke-linecap="round"/>
+  <path d="M99 532C64 407 107 252 223 146" fill="none" stroke="#ffcf23" stroke-width="12" stroke-linecap="round"/>
+  <g fill="#7a31e6" font-family="Arial Black, Arial, sans-serif" font-weight="900" text-anchor="middle">
+    <text x="512" y="397" font-size="184" letter-spacing="0">TO</text>
+    <text x="512" y="581" font-size="184" letter-spacing="0">READ</text>
+    <text x="512" y="761" font-size="184" letter-spacing="0">.ME</text>
+  </g>
+</svg>
