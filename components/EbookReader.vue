@@ -2,8 +2,8 @@
 import {
   ArrowsPointingInIcon,
   ArrowsPointingOutIcon,
-  ArrowLeftIcon,
-  ArrowRightIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{
@@ -12,7 +12,6 @@ const props = defineProps<{
   readerStyle: Record<string, string>
   readerTextStyle: Record<string, string>
   readerExpanded: boolean
-  controlClass: string[] | string
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +26,7 @@ const totalPages = ref<number | null>(null)
 
 let book: any
 let rendition: any
+let resizeFrame: number | null = null
 
 const applyTheme = () => {
   if (!rendition) return
@@ -69,34 +69,26 @@ const applyTheme = () => {
   rendition.themes.select('toread')
 }
 
-const resizeRendition = async () => {
+const resizeRendition = () => {
   if (!rendition || !areaRef.value) return
-
-  const { width, height } = areaRef.value.getBoundingClientRect()
-  rendition.resize(Math.floor(width), Math.floor(height))
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+  resizeFrame = requestAnimationFrame(() => {
+    const { width, height } = areaRef.value!.getBoundingClientRect()
+    if (width > 0 && height > 0) {
+      rendition.resize(Math.floor(width), Math.floor(height))
+    }
+  })
 }
 
-const showPrevious = () => {
-  rendition?.prev()
-}
-
-const showNext = () => {
-  rendition?.next()
-}
+const showPrevious = () => rendition?.prev()
+const showNext = () => rendition?.next()
 
 const updateLocation = (location: any) => {
   if (!book?.locations || !location?.start?.cfi) return
-
   const page = book.locations.locationFromCfi(location.start.cfi)
   const total = book.locations.length()
-
-  if (typeof page === 'number' && page >= 0) {
-    currentPage.value = page + 1
-  }
-
-  if (typeof total === 'number' && total > 0) {
-    totalPages.value = total
-  }
+  if (typeof page === 'number' && page >= 0) currentPage.value = page + 1
+  if (typeof total === 'number' && total > 0) totalPages.value = total
 }
 
 const destroyReader = () => {
@@ -108,7 +100,6 @@ const destroyReader = () => {
 
 const loadBook = async () => {
   if (!areaRef.value) return
-
   destroyReader()
   loading.value = true
   error.value = ''
@@ -128,11 +119,12 @@ const loadBook = async () => {
     applyTheme()
     await rendition.display()
     rendition.on('relocated', updateLocation)
-    book.ready.then(() => book.locations.generate(1200)).then(() => {
-      totalPages.value = book.locations.length()
-      const location = rendition.currentLocation()
-      updateLocation(location)
-    })
+    book.ready
+      .then(() => book.locations.generate(1200))
+      .then(() => {
+        totalPages.value = book.locations.length()
+        updateLocation(rendition.currentLocation())
+      })
     loading.value = false
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unable to load ebook'
@@ -140,13 +132,25 @@ const loadBook = async () => {
   }
 }
 
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.target instanceof HTMLElement) {
+    const tag = event.target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+  }
+  if (event.key === 'ArrowLeft') showPrevious()
+  else if (event.key === 'ArrowRight') showNext()
+}
+
 onMounted(async () => {
   await loadBook()
   window.addEventListener('resize', resizeRendition)
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeRendition)
+  window.removeEventListener('keydown', handleKeydown)
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
   destroyReader()
 })
 
@@ -159,30 +163,70 @@ watch(
 )
 
 watch(
-  () => [props.readerStyle, props.readerTextStyle, props.readerExpanded],
+  () => [props.readerStyle, props.readerTextStyle],
   async () => {
     await nextTick()
     applyTheme()
-    await resizeRendition()
+    resizeRendition()
   },
   { deep: true },
 )
+
+watch(
+  () => props.readerExpanded,
+  async () => {
+    await nextTick()
+    resizeRendition()
+  },
+)
+
+const controlButtonClass = computed(() => [
+  'inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition-colors',
+  props.mode === 'night'
+    ? 'text-white hover:bg-white/10'
+    : 'text-gray-800 hover:bg-black/5',
+])
+
+const dividerClass = computed(() =>
+  props.mode === 'night' ? 'border-white/15' : 'border-black/10',
+)
+
+const contentPaddingStyle = computed(() => {
+  if (props.readerExpanded) {
+    return {
+      paddingTop: 'max(3.5rem, env(safe-area-inset-top, 0px))',
+      paddingBottom: '1rem',
+      paddingLeft: 'max(2rem, env(safe-area-inset-left, 0px))',
+      paddingRight: 'max(2rem, env(safe-area-inset-right, 0px))',
+    }
+  }
+  return {
+    paddingTop: '3rem',
+    paddingBottom: '0.75rem',
+    paddingLeft: '1.5rem',
+    paddingRight: '1.5rem',
+  }
+})
 </script>
 
 <template>
   <article
-    class="relative mx-auto min-h-[540px] rounded-md border border-gray-700 p-8 shadow-xl transition-colors sm:p-12"
+    class="relative flex flex-col overflow-hidden transition-colors"
+    :class="readerExpanded
+      ? 'h-[100dvh] w-full'
+      : 'mx-auto h-[min(78vh,720px)] max-w-3xl rounded-lg border border-gray-700 shadow-xl'"
     :style="readerStyle"
-    :class="[
-      mode === 'night' ? 'border-gray-800' : '',
-      readerExpanded ? 'max-w-5xl' : 'max-w-3xl',
-    ]"
   >
     <button
       type="button"
-      class="absolute right-4 top-4 z-10 rounded-md p-2"
-      :class="controlClass"
-      :aria-label="readerExpanded ? 'Exit full page reader preview' : 'Expand reader preview'"
+      class="absolute right-4 top-4 z-20 rounded-full p-2 backdrop-blur-sm transition-colors"
+      :class="[
+        mode === 'night'
+          ? 'bg-white/10 text-white hover:bg-white/20'
+          : 'bg-black/5 text-gray-800 hover:bg-black/10',
+        readerExpanded ? 'top-[max(1rem,env(safe-area-inset-top,0px))] right-[max(1rem,env(safe-area-inset-right,0px))]' : '',
+      ]"
+      :aria-label="readerExpanded ? 'Exit fullscreen' : 'Enter fullscreen'"
       @click="emit('toggleExpanded')"
     >
       <ArrowsPointingInIcon v-if="readerExpanded" class="size-5" aria-hidden="true" />
@@ -190,50 +234,46 @@ watch(
     </button>
 
     <div
-      ref="areaRef"
-      class="h-[520px] overflow-hidden"
-      :class="readerExpanded ? 'sm:h-[calc(100vh-190px)]' : ''"
+      class="min-h-0 flex-1"
+      :style="contentPaddingStyle"
     >
-      <div v-if="loading" class="flex h-full items-center justify-center text-sm font-semibold opacity-70">
-        Loading ebook...
-      </div>
-      <div v-else-if="error" class="flex h-full items-center justify-center text-center text-sm font-semibold text-red-400">
-        {{ error }}
+      <div ref="areaRef" class="h-full w-full overflow-hidden">
+        <div v-if="loading" class="flex h-full items-center justify-center text-sm font-semibold opacity-70">
+          Loading ebook...
+        </div>
+        <div v-else-if="error" class="flex h-full items-center justify-center text-center text-sm font-semibold text-red-400">
+          {{ error }}
+        </div>
       </div>
     </div>
 
     <nav
-      class="mt-6 flex items-center justify-between border-t pt-6"
-      :class="mode === 'night' ? 'border-white/20' : 'border-gray-300'"
+      class="flex shrink-0 items-center justify-between gap-3 border-t px-3 py-2 sm:px-6"
+      :class="dividerClass"
       aria-label="Reader pagination"
     >
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-md p-1 text-sm font-bold"
-        :class="controlClass"
+        :class="controlButtonClass"
         aria-label="Previous page"
         @click="showPrevious"
       >
-        <ArrowLeftIcon class="size-6" aria-hidden="true" />
-        <span>Previous</span>
+        <ChevronLeftIcon class="size-5" aria-hidden="true" />
+        <span class="hidden sm:inline">Previous</span>
       </button>
 
-      <div
-        class="fixed bottom-5 right-5 z-[80] rounded-md border px-3 py-2 text-xs font-bold shadow-lg backdrop-blur"
-        :class="mode === 'night' ? 'border-white/20 bg-black/70 text-white' : 'border-gray-300 bg-white/80 text-gray-800'"
-      >
+      <span class="text-xs font-bold tabular-nums opacity-80 sm:text-sm">
         Page {{ currentPage }}<span v-if="totalPages"> / {{ totalPages }}</span>
-      </div>
+      </span>
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-md p-1 text-sm font-bold"
-        :class="controlClass"
+        :class="controlButtonClass"
         aria-label="Next page"
         @click="showNext"
       >
-        <span>Next</span>
-        <ArrowRightIcon class="size-6" aria-hidden="true" />
+        <span class="hidden sm:inline">Next</span>
+        <ChevronRightIcon class="size-5" aria-hidden="true" />
       </button>
     </nav>
   </article>
