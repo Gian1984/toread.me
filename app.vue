@@ -18,12 +18,14 @@ import {
   getAuthorName,
   getCoverUrl,
   getEpubUrl,
+  getGutendexBook,
   popularGutendexBooks,
   searchGutendexBooks,
 } from '~/composables/useGutendex'
 
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+const route = useRoute()
 const searchQuery = ref('')
 const mode = ref<'day' | 'night'>('day')
 const warmth = ref(38)
@@ -42,6 +44,8 @@ const activeBookTitle = ref<string>(activeBook.title)
 const activeBookAuthor = ref<string>(activeBook.author)
 const activeBookSource = ref<string>(activeBook.source)
 const importedBookUrl = ref<string | null>(null)
+const blockedReaderMessage = ref('')
+const blockedReaderUrl = ref('')
 
 const typefaces = [
   { label: 'Serif', value: 'serif', stack: 'Georgia, Cambria, "Times New Roman", serif' },
@@ -51,9 +55,9 @@ const typefaces = [
 ]
 
 const navItems = [
-  { label: 'Reader', href: '#reader' },
-  { label: 'Library', href: '#library' },
-  { label: 'About', href: '#about' },
+  { label: 'Reader', href: '/#reader' },
+  { label: 'Library', href: '/library/' },
+  { label: 'About', href: '/about/' },
 ]
 
 const searchResults = ref<GutendexBook[]>([])
@@ -65,6 +69,13 @@ let searchAbort: AbortController | null = null
 const popularBooks = ref<GutendexBook[]>([])
 const isLoadingPopular = ref(true)
 const popularError = ref('')
+
+const isHomePage = computed(() => route.path === '/')
+const isLibraryPage = computed(() => route.path === '/library/' || route.path === '/library')
+const isAboutPage = computed(() => route.path === '/about/' || route.path === '/about')
+if (route.path === '/') {
+  useSeo('home')
+}
 
 const readerStyle = computed(() => {
   const currentTypeface = typefaces.find((t) => t.value === selectedTypeface.value)
@@ -94,6 +105,17 @@ const readerTextStyle = computed(() => ({
 const openSidebar = () => { sidebarOpen.value = true }
 const closeSidebar = () => { sidebarOpen.value = false }
 
+const isBrowserReadableEpub = (url: string) => {
+  if (url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) return true
+  if (typeof window === 'undefined') return false
+
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+
 const loadGutendexBook = (book: GutendexBook) => {
   const epubUrl = getEpubUrl(book)
   if (!epubUrl) {
@@ -108,12 +130,32 @@ const loadGutendexBook = (book: GutendexBook) => {
   activeBookTitle.value = book.title
   activeBookAuthor.value = getAuthorName(book)
   activeBookSource.value = 'Project Gutenberg'
+  blockedReaderUrl.value = epubUrl
+  blockedReaderMessage.value = isBrowserReadableEpub(epubUrl)
+    ? ''
+    : 'This Project Gutenberg EPUB is hosted on another domain without browser CORS access, so toread.me cannot open it directly from the static site. Open the source EPUB or use a local EPUB file.'
   searchQuery.value = ''
   searchResults.value = []
   showSearchResults.value = false
   closeSidebar()
   if (typeof window !== 'undefined') {
     document.getElementById('reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
+const loadedRouteBookId = ref('')
+
+const loadRouteBook = async () => {
+  if (route.path !== '/') return
+  const routeBook = Array.isArray(route.query.book) ? route.query.book[0] : route.query.book
+  if (!routeBook || routeBook === loadedRouteBookId.value) return
+  loadedRouteBookId.value = routeBook
+
+  try {
+    const book = await getGutendexBook(routeBook)
+    loadGutendexBook(book)
+  } catch {
+    popularError.value = 'Could not open this Gutenberg book.'
   }
 }
 
@@ -141,6 +183,14 @@ watch(searchQuery, (q) => {
   }, 300)
 })
 
+watch(
+  () => [route.path, route.query.book],
+  () => {
+    void loadRouteBook()
+  },
+  { immediate: true },
+)
+
 const setImportedBook = (file: File) => {
   if (!file.name.toLowerCase().endsWith('.epub')) return
   if (importedBookUrl.value) URL.revokeObjectURL(importedBookUrl.value)
@@ -150,6 +200,8 @@ const setImportedBook = (file: File) => {
   activeBookTitle.value = file.name.replace(/\.epub$/i, '')
   activeBookAuthor.value = 'Local import'
   activeBookSource.value = 'Your device'
+  blockedReaderMessage.value = ''
+  blockedReaderUrl.value = ''
 }
 
 const handleBookInput = (event: Event) => {
@@ -256,6 +308,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="min-h-screen bg-gray-950 text-gray-100">
+    <template>
     <header
       v-show="!readerExpanded"
       class="sticky top-0 z-40 bg-gray-900 shadow-sm"
@@ -272,7 +325,7 @@ onBeforeUnmount(() => {
           </button>
 
           <a
-            href="#reader"
+            href="/"
             class="flex shrink-0 items-center rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             aria-label="toread.me home"
           >
@@ -291,6 +344,7 @@ onBeforeUnmount(() => {
               :key="item.label"
               :href="item.href"
               class="rounded-md px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              :class="(item.label === 'Library' && isLibraryPage) || (item.label === 'Reader' && isHomePage) || (item.label === 'About' && isAboutPage) ? 'bg-indigo-600 text-white hover:bg-indigo-600' : ''"
             >
               {{ item.label }}
             </a>
@@ -417,8 +471,9 @@ onBeforeUnmount(() => {
         <ul class="space-y-2" :class="sidebarCollapsed ? 'flex flex-col items-center' : ''">
           <li>
             <a
-              href="#reader"
-              class="flex items-center gap-3 rounded-md bg-indigo-500/20 p-2 text-sm font-semibold text-indigo-300"
+              href="/#reader"
+              class="flex items-center gap-3 rounded-md p-2 text-sm font-semibold transition-colors hover:bg-gray-800 hover:text-white"
+              :class="isHomePage ? 'bg-indigo-500/20 text-indigo-300' : 'text-gray-200'"
               @click="closeSidebar"
             >
               <BookOpenIcon class="size-6 shrink-0" aria-hidden="true" />
@@ -438,8 +493,9 @@ onBeforeUnmount(() => {
           </li>
           <li>
             <a
-              href="#library"
-              class="flex items-center gap-3 rounded-md p-2 text-sm font-semibold text-gray-200 transition-colors hover:bg-gray-800 hover:text-white"
+              href="/library/"
+              class="flex items-center gap-3 rounded-md p-2 text-sm font-semibold transition-colors hover:bg-gray-800 hover:text-white"
+              :class="isLibraryPage ? 'bg-indigo-500/20 text-indigo-300' : 'text-gray-200'"
               @click="closeSidebar"
             >
               <BuildingLibraryIcon class="size-6 shrink-0" aria-hidden="true" />
@@ -479,6 +535,7 @@ onBeforeUnmount(() => {
       :class="readerExpanded ? '' : (sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72')"
     >
       <section
+        v-if="isHomePage"
         v-show="!readerExpanded"
         class="mx-auto max-w-5xl px-4 pt-6 sm:px-6 lg:px-8"
       >
@@ -494,6 +551,7 @@ onBeforeUnmount(() => {
       </section>
 
       <section
+        v-if="isHomePage"
         id="reader"
         :class="readerExpanded
           ? 'fixed inset-0 z-[60]'
@@ -508,6 +566,8 @@ onBeforeUnmount(() => {
             :reader-style="readerStyle"
             :reader-text-style="readerTextStyle"
             :reader-expanded="readerExpanded"
+            :blocked-message="blockedReaderMessage"
+            :blocked-url="blockedReaderUrl"
             @toggle-expanded="toggleFullscreen"
           />
           <template #fallback>
@@ -542,22 +602,29 @@ onBeforeUnmount(() => {
       </section>
 
       <section
+        v-if="isHomePage"
         v-show="!readerExpanded"
-        id="library"
+        id="popular"
         class="mx-auto max-w-5xl px-4 pb-10 sm:px-6 lg:px-8"
       >
         <div class="flex items-end justify-between">
           <div>
-            <h2 class="text-base font-bold uppercase tracking-wide text-gray-400">Library</h2>
-            <p class="mt-1 text-sm text-gray-500">Popular books from Project Gutenberg.</p>
+            <h2 class="text-base font-bold uppercase tracking-wide text-gray-400">Popular reads</h2>
+            <p class="mt-1 text-sm text-gray-500">A small preview from Project Gutenberg.</p>
           </div>
+          <NuxtLink
+            to="/library/"
+            class="rounded-md px-3 py-2 text-sm font-semibold text-indigo-300 transition-colors hover:bg-gray-800 hover:text-white"
+          >
+            Open library
+          </NuxtLink>
         </div>
 
-        <div v-if="isLoadingPopular" class="mt-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div v-if="isLoadingPopular" class="mt-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" aria-live="polite">
           <div
             v-for="i in 8"
             :key="i"
-            class="aspect-[2/3] animate-pulse rounded-lg border border-gray-800 bg-gray-900"
+            class="library-skeleton relative aspect-[2/3] overflow-hidden rounded-lg border border-indigo-500/30 bg-gray-900 shadow-xl shadow-indigo-950/30"
           />
         </div>
 
@@ -591,6 +658,8 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <NuxtPage v-if="!isHomePage && !readerExpanded" />
+
       <AppFooter v-show="!readerExpanded" />
     </main>
 
@@ -621,6 +690,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </transition>
+    </template>
+
+    <CookieConsent />
   </div>
 </template>
 
@@ -645,5 +717,41 @@ onBeforeUnmount(() => {
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgb(55 65 81) rgb(17 24 39);
+}
+
+.library-skeleton::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  content: "";
+  background:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      transparent 28%,
+      rgba(129, 140, 248, 0.34) 45%,
+      rgba(255, 255, 255, 0.2) 50%,
+      rgba(129, 140, 248, 0.34) 55%,
+      transparent 72%,
+      transparent 100%
+    );
+  transform: translateX(-100%);
+  animation: library-shimmer 1.15s ease-in-out infinite;
+}
+
+.library-skeleton::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  background:
+    radial-gradient(circle at 20% 16%, rgba(99, 102, 241, 0.28), transparent 28%),
+    linear-gradient(180deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.92));
+}
+
+@keyframes library-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 </style>

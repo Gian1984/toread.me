@@ -3,11 +3,10 @@ import { defineComponent, h } from 'vue'
 
 const navigation = {
   main: [
-    { name: 'Reader', href: '#reader' },
-    { name: 'Library', href: '#library' },
-    { name: 'Settings', href: '#settings' },
-    { name: 'Project', href: '/' },
-    { name: 'Privacy', href: '/' },
+    { name: 'Reader', href: '/#reader' },
+    { name: 'Library', href: '/library/' },
+    { name: 'About', href: '/about/' },
+    { name: 'Privacy', href: '/privacy/' },
   ],
   social: [
     {

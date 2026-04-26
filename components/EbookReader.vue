@@ -12,6 +12,8 @@ const props = defineProps<{
   readerStyle: Record<string, string>
   readerTextStyle: Record<string, string>
   readerExpanded: boolean
+  blockedMessage?: string
+  blockedUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -21,6 +23,7 @@ const emit = defineEmits<{
 const areaRef = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const error = ref('')
+const errorLink = ref('')
 const currentPage = ref(1)
 const totalPages = ref<number | null>(null)
 
@@ -103,8 +106,16 @@ const loadBook = async () => {
   destroyReader()
   loading.value = true
   error.value = ''
+  errorLink.value = ''
   currentPage.value = 1
   totalPages.value = null
+
+  if (props.blockedMessage) {
+    error.value = props.blockedMessage
+    errorLink.value = props.blockedUrl ?? ''
+    loading.value = false
+    return
+  }
 
   try {
     const epub = (await import('epubjs')).default
@@ -117,7 +128,14 @@ const loadBook = async () => {
     })
 
     applyTheme()
-    await rendition.display()
+    await Promise.race([
+      rendition.display(),
+      new Promise((_, reject) => {
+        window.setTimeout(() => {
+          reject(new Error('The ebook took too long to load. The remote server may be blocking browser access.'))
+        }, 12000)
+      }),
+    ])
     rendition.on('relocated', updateLocation)
     book.ready
       .then(() => book.locations.generate(1200))
@@ -156,6 +174,14 @@ onBeforeUnmount(() => {
 
 watch(
   () => props.file,
+  async () => {
+    await nextTick()
+    await loadBook()
+  },
+)
+
+watch(
+  () => props.blockedMessage,
   async () => {
     await nextTick()
     await loadBook()
@@ -241,8 +267,19 @@ const contentPaddingStyle = computed(() => {
         <div v-if="loading" class="flex h-full items-center justify-center text-sm font-semibold opacity-70">
           Loading ebook...
         </div>
-        <div v-else-if="error" class="flex h-full items-center justify-center text-center text-sm font-semibold text-red-400">
-          {{ error }}
+        <div v-else-if="error" class="flex h-full items-center justify-center px-6 text-center text-sm font-semibold text-red-400">
+          <div class="max-w-md">
+            <p>{{ error }}</p>
+            <a
+              v-if="errorLink"
+              :href="errorLink"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-4 inline-flex text-indigo-500 underline-offset-4 hover:underline"
+            >
+              Open EPUB source
+            </a>
+          </div>
         </div>
       </div>
     </div>
