@@ -40,6 +40,37 @@ const appendLanguages = (url: URL, languages?: string | string[]) => {
   url.searchParams.set('languages', Array.isArray(languages) ? languages.join(',') : languages)
 }
 
+const buildListUrl = (
+  base: string,
+  { search, topic, languages, sort = 'popular', page }: GutendexListParams = {},
+) => {
+  const url = new URL(base)
+  if (search?.trim()) url.searchParams.set('search', search.trim())
+  if (topic?.trim()) url.searchParams.set('topic', topic.trim())
+  if (sort) url.searchParams.set('sort', sort)
+  if (page && page > 1) url.searchParams.set('page', String(page))
+  appendLanguages(url, languages)
+  return url
+}
+
+const fetchGutendexJson = async <T>(proxyUrl: string, directUrl: string, signal?: AbortSignal): Promise<T> => {
+  const urls = typeof window === 'undefined' ? [directUrl] : [proxyUrl, directUrl]
+  let lastError: unknown = null
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { signal })
+      if (!res.ok) throw new Error(`Gutendex request failed: ${res.status}`)
+      return await res.json()
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') throw error
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Gutendex request failed')
+}
+
 export const listGutendexBooks = async ({
   search,
   topic,
@@ -48,19 +79,10 @@ export const listGutendexBooks = async ({
   page,
   signal,
 }: GutendexListParams = {}): Promise<GutendexResponse> => {
-  const url = new URL(
-    typeof window === 'undefined' ? DIRECT_BASE : PROXY_BASE,
-    typeof window === 'undefined' ? DIRECT_BASE : window.location.origin,
-  )
-  if (search?.trim()) url.searchParams.set('search', search.trim())
-  if (topic?.trim()) url.searchParams.set('topic', topic.trim())
-  if (sort) url.searchParams.set('sort', sort)
-  if (page && page > 1) url.searchParams.set('page', String(page))
-  appendLanguages(url, languages)
-
-  const res = await fetch(url.toString(), { signal })
-  if (!res.ok) throw new Error(`Gutendex request failed: ${res.status}`)
-  return await res.json()
+  const params = { search, topic, languages, sort, page }
+  const proxyUrl = buildListUrl(PROXY_BASE, params).toString()
+  const directUrl = buildListUrl(DIRECT_BASE, params).toString()
+  return await fetchGutendexJson<GutendexResponse>(proxyUrl, directUrl, signal)
 }
 
 export const searchGutendexBooks = async (
@@ -84,13 +106,9 @@ export const getGutendexBook = async (
   id: number | string,
   signal?: AbortSignal,
 ): Promise<GutendexBook> => {
-  const url =
-    typeof window === 'undefined'
-      ? new URL(String(id), DIRECT_BASE).toString()
-      : `${PROXY_BASE}?id=${encodeURIComponent(String(id))}`
-  const res = await fetch(url, { signal })
-  if (!res.ok) throw new Error(`Gutendex book failed: ${res.status}`)
-  return await res.json()
+  const proxyUrl = `${PROXY_BASE}?id=${encodeURIComponent(String(id))}`
+  const directUrl = new URL(String(id), DIRECT_BASE).toString()
+  return await fetchGutendexJson<GutendexBook>(proxyUrl, directUrl, signal)
 }
 
 export const getReaderEpubUrl = (url: string): string => {

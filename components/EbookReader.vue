@@ -145,7 +145,10 @@ const loadBook = async () => {
       })
     loading.value = false
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Unable to load ebook'
+    error.value = props.blockedUrl
+      ? 'This Gutenberg EPUB could not be loaded through the server proxy before timeout. Open the source EPUB or try another book.'
+      : err instanceof Error ? err.message : 'Unable to load ebook'
+    errorLink.value = props.blockedUrl ?? ''
     loading.value = false
   }
 }
