@@ -19,6 +19,7 @@ import {
   getCoverUrl,
   getEpubUrl,
   getGutendexBook,
+  getReaderEpubUrl,
   popularGutendexBooks,
   searchGutendexBooks,
 } from '~/composables/useGutendex'
@@ -105,17 +106,6 @@ const readerTextStyle = computed(() => ({
 const openSidebar = () => { sidebarOpen.value = true }
 const closeSidebar = () => { sidebarOpen.value = false }
 
-const isBrowserReadableEpub = (url: string) => {
-  if (url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) return true
-  if (typeof window === 'undefined') return false
-
-  try {
-    return new URL(url, window.location.href).origin === window.location.origin
-  } catch {
-    return false
-  }
-}
-
 const loadGutendexBook = (book: GutendexBook) => {
   const epubUrl = getEpubUrl(book)
   if (!epubUrl) {
@@ -126,14 +116,12 @@ const loadGutendexBook = (book: GutendexBook) => {
     URL.revokeObjectURL(importedBookUrl.value)
     importedBookUrl.value = null
   }
-  activeBookFile.value = epubUrl
+  activeBookFile.value = getReaderEpubUrl(epubUrl)
   activeBookTitle.value = book.title
   activeBookAuthor.value = getAuthorName(book)
   activeBookSource.value = 'Project Gutenberg'
   blockedReaderUrl.value = epubUrl
-  blockedReaderMessage.value = isBrowserReadableEpub(epubUrl)
-    ? ''
-    : 'This Project Gutenberg EPUB is hosted on another domain without browser CORS access, so toread.me cannot open it directly from the static site. Open the source EPUB or use a local EPUB file.'
+  blockedReaderMessage.value = ''
   searchQuery.value = ''
   searchResults.value = []
   showSearchResults.value = false
@@ -149,10 +137,10 @@ const loadRouteBook = async () => {
   if (route.path !== '/') return
   const routeBook = Array.isArray(route.query.book) ? route.query.book[0] : route.query.book
   if (!routeBook || routeBook === loadedRouteBookId.value) return
-  loadedRouteBookId.value = routeBook
 
   try {
     const book = await getGutendexBook(routeBook)
+    loadedRouteBookId.value = routeBook
     loadGutendexBook(book)
   } catch {
     popularError.value = 'Could not open this Gutenberg book.'
@@ -188,7 +176,6 @@ watch(
   () => {
     void loadRouteBook()
   },
-  { immediate: true },
 )
 
 const setImportedBook = (file: File) => {
@@ -285,6 +272,7 @@ onMounted(async () => {
   window.addEventListener('dragover', handleGlobalDragOver)
   window.addEventListener('drop', handleGlobalDrop)
   document.addEventListener('fullscreenchange', onFullscreenChange)
+  void loadRouteBook()
 
   try {
     const books = await popularGutendexBooks()

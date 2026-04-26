@@ -23,7 +23,8 @@ export type GutendexResponse = {
   results: GutendexBook[]
 }
 
-const BASE = 'https://gutendex.com/books/'
+const DIRECT_BASE = 'https://gutendex.com/books/'
+const PROXY_BASE = '/api/gutendex.php'
 
 export type GutendexListParams = {
   search?: string
@@ -47,7 +48,10 @@ export const listGutendexBooks = async ({
   page,
   signal,
 }: GutendexListParams = {}): Promise<GutendexResponse> => {
-  const url = new URL(BASE)
+  const url = new URL(
+    typeof window === 'undefined' ? DIRECT_BASE : PROXY_BASE,
+    typeof window === 'undefined' ? DIRECT_BASE : window.location.origin,
+  )
   if (search?.trim()) url.searchParams.set('search', search.trim())
   if (topic?.trim()) url.searchParams.set('topic', topic.trim())
   if (sort) url.searchParams.set('sort', sort)
@@ -80,9 +84,18 @@ export const getGutendexBook = async (
   id: number | string,
   signal?: AbortSignal,
 ): Promise<GutendexBook> => {
-  const res = await fetch(new URL(String(id), BASE).toString(), { signal })
+  const url =
+    typeof window === 'undefined'
+      ? new URL(String(id), DIRECT_BASE).toString()
+      : `${PROXY_BASE}?id=${encodeURIComponent(String(id))}`
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`Gutendex book failed: ${res.status}`)
   return await res.json()
+}
+
+export const getReaderEpubUrl = (url: string): string => {
+  if (url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) return url
+  return `/api/epub.php?url=${encodeURIComponent(url)}`
 }
 
 export const getEpubUrl = (book: GutendexBook): string | null => {
