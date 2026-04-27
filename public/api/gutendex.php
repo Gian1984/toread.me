@@ -1,8 +1,11 @@
 <?php
 declare(strict_types=1);
 
+@ini_set('zlib.output_compression', '0');
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: public, max-age=300');
+header('X-Accel-Buffering: no');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);
@@ -32,9 +35,12 @@ if (isset($_GET['id'])) {
 }
 
 $response = fetch_url($target, 'application/json');
-if ($response['status'] >= 400 || $response['body'] === '') {
-    http_response_code($response['status'] ?: 502);
-    echo json_encode(['detail' => 'Gutendex request failed']);
+if ($response['status'] < 200 || $response['status'] >= 400 || $response['body'] === '') {
+    http_response_code(502);
+    echo json_encode([
+        'detail' => 'Gutendex request failed',
+        'upstream_status' => $response['status'],
+    ]);
     exit;
 }
 
@@ -48,8 +54,9 @@ function fetch_url(string $url, string $accept): array
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_TIMEOUT => 20,
+            CURLOPT_CONNECTTIMEOUT => 6,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_HTTPHEADER => ['Accept: ' . $accept],
             CURLOPT_USERAGENT => 'toread.me/1.0',
         ]);
@@ -67,15 +74,13 @@ function fetch_url(string $url, string $accept): array
         'http' => [
             'method' => 'GET',
             'header' => "Accept: {$accept}\r\nUser-Agent: toread.me/1.0\r\n",
-            'timeout' => 20,
+            'timeout' => 15,
             'ignore_errors' => true,
         ],
     ]);
-    $body = file_get_contents($url, false, $context);
+    $body = @file_get_contents($url, false, $context);
     $status = 0;
-    $headers = function_exists('http_get_last_response_headers')
-        ? http_get_last_response_headers()
-        : ($http_response_header ?? []);
+    $headers = $http_response_header ?? [];
 
     if (isset($headers[0]) && preg_match('/\s(\d{3})\s/', $headers[0], $matches)) {
         $status = (int) $matches[1];

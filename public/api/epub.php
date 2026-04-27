@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-set_time_limit(180);
+@set_time_limit(300);
+@ini_set('output_buffering', 'off');
+@ini_set('zlib.output_compression', '0');
 ignore_user_abort(true);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
@@ -23,24 +25,7 @@ if ($url === '' || $scheme !== 'https' || !is_allowed_host($host)) {
     exit;
 }
 
-$result = fetch_epub_to_temp($url);
-
-if (!$result['ok'] || !is_file($result['file']) || filesize($result['file']) === 0) {
-    if (is_file($result['file'])) {
-        unlink($result['file']);
-    }
-    http_response_code($result['status'] ?: 504);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'Unable to fetch EPUB before timeout';
-    exit;
-}
-
-header('Content-Type: application/epub+zip');
-header('Content-Disposition: inline; filename="book.epub"');
-header('Content-Length: ' . filesize($result['file']));
-header('Cache-Control: public, max-age=86400');
-readfile($result['file']);
-unlink($result['file']);
+stream_epub($url);
 
 function is_allowed_host(string $host): bool
 {
@@ -50,64 +35,116 @@ function is_allowed_host(string $host): bool
         || str_ends_with($host, '.gutenberg.pglaf.org');
 }
 
-function fetch_epub_to_temp(string $url): array
+function stream_epub(string $url): void
 {
-    $tmp = tempnam(sys_get_temp_dir(), 'toread-epub-');
-    if ($tmp === false) {
-        return ['ok' => false, 'status' => 500, 'file' => ''];
+    while (ob_get_level() > 0) {
+        ob_end_clean();
     }
 
-    if (function_exists('curl_init')) {
-        $handle = fopen($tmp, 'wb');
-        if (!$handle) {
-            return ['ok' => false, 'status' => 500, 'file' => $tmp];
+    $headersSent = false;
+    $upstreamStatus = 0;
+    $contentLength = '';
+
+    $sendHeadersOnce = static function () use (&$headersSent, &$upstreamStatus, &$contentLength) {
+        if ($headersSent) return;
+        $headersSent = true;
+
+        if ($upstreamStatus < 200 || $upstreamStatus >= 400) {
+            http_response_code($upstreamStatus >= 400 ? $upstreamStatus : 502);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Unable to fetch EPUB from upstream';
+            return;
         }
 
+        header('Content-Type: application/epub+zip');
+        header('Content-Disposition: inline; filename="book.epub"');
+        header('Cache-Control: public, max-age=86400');
+        header('X-Accel-Buffering: no');
+        if ($contentLength !== '') {
+            header('Content-Length: ' . $contentLength);
+        }
+    };
+
+    if (function_exists('curl_init')) {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
-            CURLOPT_FILE => $handle,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_TIMEOUT => 150,
+            CURLOPT_TIMEOUT => 240,
             CURLOPT_LOW_SPEED_LIMIT => 1024,
             CURLOPT_LOW_SPEED_TIME => 30,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_HTTPHEADER => ['Accept: application/epub+zip,application/octet-stream,*/*'],
             CURLOPT_USERAGENT => 'toread.me/1.0',
+            CURLOPT_HEADERFUNCTION => static function ($ch, string $header) use (&$upstreamStatus, &$contentLength): int {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $header, $m)) {
+                    $upstreamStatus = (int) $m[1];
+                    $contentLength = '';
+                } elseif (stripos($header, 'Content-Length:') === 0 && $upstreamStatus >= 200 && $upstreamStatus < 300) {
+                    $contentLength = trim(substr($header, strlen('Content-Length:')));
+                }
+                return strlen($header);
+            },
+            CURLOPT_WRITEFUNCTION => static function ($ch, string $chunk) use (&$sendHeadersOnce, &$upstreamStatus): int {
+                $sendHeadersOnce();
+                if ($upstreamStatus >= 200 && $upstreamStatus < 300) {
+                    echo $chunk;
+                    @ob_flush();
+                    @flush();
+                }
+                return strlen($chunk);
+            },
         ]);
-        $result = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $ok = curl_exec($ch);
+        $err = curl_errno($ch);
         curl_close($ch);
-        fclose($handle);
 
-        return [
-            'ok' => $result !== false && $status >= 200 && $status < 400,
-            'status' => $status ?: 504,
-            'file' => $tmp,
-        ];
+        if (!$headersSent) {
+            if ($ok === false || $err !== 0) {
+                http_response_code(504);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Unable to fetch EPUB before timeout';
+            } else {
+                $sendHeadersOnce();
+            }
+        }
+        return;
     }
 
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
             'header' => "Accept: application/epub+zip,application/octet-stream,*/*\r\nUser-Agent: toread.me/1.0\r\n",
-            'timeout' => 150,
+            'timeout' => 240,
             'ignore_errors' => true,
         ],
     ]);
-    $source = fopen($url, 'rb', false, $context);
-    if (!$source) return ['ok' => false, 'status' => 504, 'file' => $tmp];
-
-    $target = fopen($tmp, 'wb');
-    if (!$target) {
-        fclose($source);
-        return ['ok' => false, 'status' => 500, 'file' => $tmp];
+    $source = @fopen($url, 'rb', false, $context);
+    if (!$source) {
+        http_response_code(504);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Unable to fetch EPUB before timeout';
+        return;
     }
 
-    while (!feof($source)) {
-        fwrite($target, fread($source, 8192));
+    $headers = $http_response_header ?? [];
+    if (isset($headers[0]) && preg_match('#\s(\d{3})\s#', $headers[0], $m)) {
+        $upstreamStatus = (int) $m[1];
+    }
+    foreach ($headers as $h) {
+        if (stripos($h, 'Content-Length:') === 0) {
+            $contentLength = trim(substr($h, strlen('Content-Length:')));
+            break;
+        }
+    }
+
+    $sendHeadersOnce();
+    if ($upstreamStatus >= 200 && $upstreamStatus < 300) {
+        while (!feof($source)) {
+            echo fread($source, 65536);
+            @ob_flush();
+            @flush();
+        }
     }
     fclose($source);
-    fclose($target);
-
-    return ['ok' => true, 'status' => 200, 'file' => $tmp];
 }
