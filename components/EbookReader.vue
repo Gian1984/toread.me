@@ -119,7 +119,7 @@ const loadBook = async () => {
 
   try {
     const epub = (await import('epubjs')).default
-    book = epub(props.file)
+    book = epub(props.file, { openAs: 'epub' })
     rendition = book.renderTo(areaRef.value, {
       width: '100%',
       height: '100%',

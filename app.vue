@@ -680,7 +680,9 @@ onBeforeUnmount(() => {
     </transition>
     </template>
 
-    <CookieConsent />
+    <ClientOnly>
+      <CookieConsent />
+    </ClientOnly>
   </div>
 </template>
 

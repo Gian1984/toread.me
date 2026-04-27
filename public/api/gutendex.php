@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+@set_time_limit(60);
 @ini_set('zlib.output_compression', '0');
 
 header('Content-Type: application/json; charset=utf-8');
@@ -54,8 +55,8 @@ function fetch_url(string $url, string $accept): array
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 6,
-            CURLOPT_TIMEOUT => 15,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 45,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_HTTPHEADER => ['Accept: ' . $accept],
             CURLOPT_USERAGENT => 'toread.me/1.0',
@@ -74,7 +75,7 @@ function fetch_url(string $url, string $accept): array
         'http' => [
             'method' => 'GET',
             'header' => "Accept: {$accept}\r\nUser-Agent: toread.me/1.0\r\n",
-            'timeout' => 15,
+            'timeout' => 45,
             'ignore_errors' => true,
         ],
     ]);
