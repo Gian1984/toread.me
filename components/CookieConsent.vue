@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="mounted && !decision"
+    v-if="mounted && !decision && !hidden"
     class="fixed inset-x-0 bottom-0 z-50 border-t border-gray-700 bg-gray-900 shadow-2xl"
   >
     <div class="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
@@ -57,7 +57,7 @@
   </div>
 
   <button
-    v-if="mounted && decision"
+    v-if="mounted && decision && !hidden"
     class="fixed bottom-20 right-4 z-50 flex size-10 items-center justify-center rounded-full border border-gray-700 bg-gray-800 text-gray-400 shadow-lg transition-all duration-300 hover:bg-gray-700 hover:text-white sm:bottom-24"
     title="Change cookie preferences"
     aria-label="Change cookie preferences"
@@ -69,6 +69,8 @@
 
 <script setup lang="ts">
 import { defineComponent, h, onMounted, reactive, ref } from 'vue'
+
+defineProps<{ hidden?: boolean }>()
 
 type ConsentPrefs = { analytics: boolean; ads: boolean }
 type ConsentDecision = null | 'accepted' | 'rejected' | 'custom'

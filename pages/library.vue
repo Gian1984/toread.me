@@ -162,9 +162,7 @@ const loadMore = async (category: LibraryCategory) => {
 }
 
 const reloadLibrary = async () => {
-  for (const category of categories) {
-    await loadCategory(category, true)
-  }
+  await Promise.all(categories.map((category) => loadCategory(category, true)))
 }
 
 const searchLibrary = async () => {

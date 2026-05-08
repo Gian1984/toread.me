@@ -35,6 +35,57 @@ const lineHeight = ref(1.75)
 const isBoldText = ref(false)
 const selectedTypeface = ref('serif')
 const readerExpanded = ref(false)
+
+const READER_PREFS_KEY = 'readerPrefs.v1'
+
+type ReaderPrefs = {
+  mode: 'day' | 'night'
+  warmth: number
+  fontSize: number
+  lineHeight: number
+  isBoldText: boolean
+  selectedTypeface: string
+}
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value))
+
+const loadReaderPrefs = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(READER_PREFS_KEY)
+    if (!raw) return
+    const saved = JSON.parse(raw) as Partial<ReaderPrefs>
+    if (saved.mode === 'day' || saved.mode === 'night') mode.value = saved.mode
+    if (typeof saved.warmth === 'number') warmth.value = clamp(saved.warmth, 0, 100)
+    if (typeof saved.fontSize === 'number') fontSize.value = clamp(saved.fontSize, 12, 32)
+    if (typeof saved.lineHeight === 'number') lineHeight.value = clamp(saved.lineHeight, 1, 2.5)
+    if (typeof saved.isBoldText === 'boolean') isBoldText.value = saved.isBoldText
+    if (typeof saved.selectedTypeface === 'string'
+      && typefaces.some((t) => t.value === saved.selectedTypeface)) {
+      selectedTypeface.value = saved.selectedTypeface
+    }
+  } catch {
+    // Corrupted localStorage payloads should not break the reader.
+  }
+}
+
+const saveReaderPrefs = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const payload: ReaderPrefs = {
+      mode: mode.value,
+      warmth: warmth.value,
+      fontSize: fontSize.value,
+      lineHeight: lineHeight.value,
+      isBoldText: isBoldText.value,
+      selectedTypeface: selectedTypeface.value,
+    }
+    window.localStorage.setItem(READER_PREFS_KEY, JSON.stringify(payload))
+  } catch {
+    // Quota or privacy mode — silent fail is fine here.
+  }
+}
 const isDraggingBook = ref(false)
 const dragDepth = ref(0)
 const bookInputRef = ref<HTMLInputElement | null>(null)
@@ -147,20 +198,44 @@ const loadRouteBook = async () => {
   }
 }
 
+const SEARCH_CACHE_LIMIT = 30
+const searchCache = new Map<string, GutendexBook[]>()
+
+const onSearchBlur = () => {
+  setTimeout(() => {
+    showSearchResults.value = false
+  }, 150)
+}
+
 watch(searchQuery, (q) => {
   if (searchTimer) clearTimeout(searchTimer)
   searchAbort?.abort()
-  if (!q.trim()) {
+  const trimmed = q.trim().toLowerCase()
+  if (!trimmed) {
     searchResults.value = []
     isSearching.value = false
     return
   }
+
+  const cached = searchCache.get(trimmed)
+  if (cached) {
+    searchResults.value = cached
+    isSearching.value = false
+    return
+  }
+
   searchTimer = setTimeout(async () => {
     searchAbort = new AbortController()
     isSearching.value = true
     try {
       const results = await searchGutendexBooks(q, searchAbort.signal)
-      searchResults.value = results.slice(0, 8)
+      const sliced = results.slice(0, 8)
+      searchResults.value = sliced
+      if (searchCache.size >= SEARCH_CACHE_LIMIT) {
+        const firstKey = searchCache.keys().next().value
+        if (firstKey !== undefined) searchCache.delete(firstKey)
+      }
+      searchCache.set(trimmed, sliced)
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
         searchResults.value = []
@@ -267,6 +342,12 @@ const fullscreenSettingsTriggerClass = computed(() => [
 ])
 
 onMounted(async () => {
+  loadReaderPrefs()
+  watch(
+    [mode, warmth, fontSize, lineHeight, isBoldText, selectedTypeface],
+    saveReaderPrefs,
+  )
+
   window.addEventListener('dragenter', handleGlobalDragEnter)
   window.addEventListener('dragleave', handleGlobalDragLeave)
   window.addEventListener('dragover', handleGlobalDragOver)
@@ -351,7 +432,7 @@ onBeforeUnmount(() => {
                 class="block w-full rounded-md border-2 border-gray-700 bg-gray-800 py-1.5 pl-10 pr-3 text-sm text-white outline-none placeholder:text-gray-400 transition-colors focus:border-transparent focus:bg-white focus:text-gray-900 focus:ring-2 focus:ring-indigo-400"
                 placeholder="Search Project Gutenberg..."
                 @focus="showSearchResults = true"
-                @blur="setTimeout(() => (showSearchResults = false), 150)"
+                @blur="onSearchBlur"
               >
               <div
                 v-if="showSearchResults && searchQuery.trim()"
@@ -681,7 +762,7 @@ onBeforeUnmount(() => {
     </template>
 
     <ClientOnly>
-      <CookieConsent />
+      <CookieConsent :hidden="readerExpanded" />
     </ClientOnly>
   </div>
 </template>
