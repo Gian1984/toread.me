@@ -107,10 +107,22 @@ const typefaces = [
 ]
 
 const navItems = [
-  { label: 'Reader', href: '/#reader' },
+  { label: 'Reader', href: '/' },
   { label: 'Library', href: '/library/' },
   { label: 'About', href: '/about/' },
 ]
+
+const scrollToReader = () => {
+  if (typeof document === 'undefined') return
+  document.getElementById('reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const onReaderNavClick = (event: MouseEvent) => {
+  if (route.path !== '/') return
+  event.preventDefault()
+  scrollToReader()
+  closeSidebar()
+}
 
 const searchResults = ref<GutendexBook[]>([])
 const isSearching = ref(false)
@@ -177,9 +189,7 @@ const loadGutendexBook = (book: GutendexBook) => {
   searchResults.value = []
   showSearchResults.value = false
   closeSidebar()
-  if (typeof window !== 'undefined') {
-    document.getElementById('reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  scrollToReader()
 }
 
 const loadedRouteBookId = ref('')
@@ -413,6 +423,7 @@ onBeforeUnmount(() => {
               :href="item.href"
               class="rounded-md px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
               :class="(item.label === 'Library' && isLibraryPage) || (item.label === 'Reader' && isHomePage) || (item.label === 'About' && isAboutPage) ? 'bg-indigo-600 text-white hover:bg-indigo-600' : ''"
+              @click="item.label === 'Reader' ? onReaderNavClick($event) : null"
             >
               {{ item.label }}
             </a>
@@ -539,10 +550,10 @@ onBeforeUnmount(() => {
         <ul class="space-y-2" :class="sidebarCollapsed ? 'flex flex-col items-center' : ''">
           <li>
             <a
-              href="/#reader"
+              href="/"
               class="flex items-center gap-3 rounded-md p-2 text-sm font-semibold transition-colors hover:bg-gray-800 hover:text-white"
               :class="isHomePage ? 'bg-indigo-500/20 text-indigo-300' : 'text-gray-200'"
-              @click="closeSidebar"
+              @click="onReaderNavClick($event)"
             >
               <BookOpenIcon class="size-6 shrink-0" aria-hidden="true" />
               <span v-if="!sidebarCollapsed">Reader</span>
