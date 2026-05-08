@@ -51,38 +51,53 @@ const buildListUrl = (
   return qs ? `${base}?${qs}` : base
 }
 
-const PER_ATTEMPT_TIMEOUT_MS = 6000
+const PER_ATTEMPT_TIMEOUT_MS = 18000
 
-const fetchWithTimeout = async (url: string, externalSignal?: AbortSignal): Promise<Response> => {
+const fetchJsonAttempt = async <T>(
+  url: string,
+  externalSignal: AbortSignal | undefined,
+  raceSignal: AbortSignal,
+): Promise<T> => {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(new Error('timeout')), PER_ATTEMPT_TIMEOUT_MS)
   const onExternalAbort = () => controller.abort(externalSignal?.reason)
+  const onRaceAbort = () => controller.abort(raceSignal.reason)
   externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
+  raceSignal.addEventListener('abort', onRaceAbort, { once: true })
   try {
-    return await fetch(url, { signal: controller.signal })
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new Error(`Gutendex request failed: ${res.status}`)
+    return (await res.json()) as T
   } finally {
     clearTimeout(timeoutId)
     externalSignal?.removeEventListener('abort', onExternalAbort)
+    raceSignal.removeEventListener('abort', onRaceAbort)
   }
 }
 
 const fetchGutendexJson = async <T>(proxyUrl: string, directUrl: string, signal?: AbortSignal): Promise<T> => {
-  const urls = typeof window === 'undefined' ? [directUrl] : [proxyUrl, directUrl]
-  let lastError: unknown = null
-
-  for (const url of urls) {
-    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
-    try {
-      const res = await fetchWithTimeout(url, signal)
-      if (!res.ok) throw new Error(`Gutendex request failed: ${res.status}`)
-      return await res.json()
-    } catch (error) {
-      if (signal?.aborted) throw error
-      lastError = error
-    }
+  if (typeof window === 'undefined') {
+    return await fetchJsonAttempt<T>(directUrl, signal, new AbortController().signal)
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Gutendex request failed')
+  const raceController = new AbortController()
+  try {
+    const winner = await Promise.any([
+      fetchJsonAttempt<T>(proxyUrl, signal, raceController.signal),
+      fetchJsonAttempt<T>(directUrl, signal, raceController.signal),
+    ])
+    return winner
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error
+    if (error instanceof AggregateError) {
+      throw error.errors[0] instanceof Error
+        ? error.errors[0]
+        : new Error('Gutendex request failed')
+    }
+    throw error
+  } finally {
+    raceController.abort()
+  }
 }
 
 export const listGutendexBooks = async ({

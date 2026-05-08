@@ -377,7 +377,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="min-h-screen bg-gray-950 text-gray-100">
-    <template>
     <header
       v-show="!readerExpanded"
       class="sticky top-0 z-40 bg-gray-900 shadow-sm"
@@ -759,7 +758,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </transition>
-    </template>
 
     <ClientOnly>
       <CookieConsent :hidden="readerExpanded" />
