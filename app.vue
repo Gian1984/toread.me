@@ -10,6 +10,7 @@ import {
   MagnifyingGlassIcon,
   MoonIcon,
   SunIcon,
+  TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { sampleBooks } from '~/data/sampleBooks'
@@ -23,6 +24,7 @@ import {
   popularGutendexBooks,
   searchGutendexBooks,
 } from '~/composables/useGutendex'
+import { type HistoryEntry, useReadingHistory } from '~/composables/useReadingHistory'
 
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
@@ -99,6 +101,20 @@ const importedBookUrl = ref<string | null>(null)
 const blockedReaderMessage = ref('')
 const blockedReaderUrl = ref('')
 
+const { history: readingHistory, upsertHistory, removeHistory, clearHistory, entryKey } = useReadingHistory()
+
+type CurrentBookSource = 'sample' | 'gutenberg' | 'local'
+const currentBookSource = ref<CurrentBookSource>('sample')
+const currentBookId = ref<string>('')
+const currentBookFileName = ref<string>('')
+const currentBookCover = ref<string>('')
+const currentBookEpubUrl = ref<string>('')
+const pendingInitialCfi = ref<string>('')
+const pendingLocalRestore = ref<{ fileName: string, cfi: string } | null>(null)
+let lastProgressSaveAt = 0
+let skipNextProgress = true
+const PROGRESS_THROTTLE_MS = 1500
+
 const typefaces = [
   { label: 'Serif', value: 'serif', stack: 'Georgia, Cambria, "Times New Roman", serif' },
   { label: 'System', value: 'system', stack: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
@@ -169,7 +185,7 @@ const readerTextStyle = computed(() => ({
 const openSidebar = () => { sidebarOpen.value = true }
 const closeSidebar = () => { sidebarOpen.value = false }
 
-const loadGutendexBook = (book: GutendexBook) => {
+const loadGutendexBook = (book: GutendexBook, initialCfi = '') => {
   const epubUrl = getEpubUrl(book)
   if (!epubUrl) {
     popularError.value = `No EPUB available for "${book.title}".`
@@ -179,6 +195,13 @@ const loadGutendexBook = (book: GutendexBook) => {
     URL.revokeObjectURL(importedBookUrl.value)
     importedBookUrl.value = null
   }
+  skipNextProgress = true
+  currentBookSource.value = 'gutenberg'
+  currentBookId.value = String(book.id)
+  currentBookFileName.value = ''
+  currentBookCover.value = getCoverUrl(book) ?? ''
+  currentBookEpubUrl.value = epubUrl
+  pendingInitialCfi.value = initialCfi
   activeBookFile.value = getReaderEpubUrl(epubUrl)
   activeBookTitle.value = book.title
   activeBookAuthor.value = getAuthorName(book)
@@ -206,6 +229,79 @@ const loadRouteBook = async () => {
   } catch {
     popularError.value = 'Could not open this Gutenberg book.'
   }
+}
+
+const onReaderProgress = ({ cfi, progress }: { cfi: string, progress: number }) => {
+  if (!cfi) return
+  if (skipNextProgress) {
+    skipNextProgress = false
+    return
+  }
+  const now = Date.now()
+  if (now - lastProgressSaveAt < PROGRESS_THROTTLE_MS) return
+  lastProgressSaveAt = now
+
+  const entry: HistoryEntry = {
+    source: currentBookSource.value,
+    bookId: currentBookSource.value === 'gutenberg' ? currentBookId.value : undefined,
+    fileName: currentBookSource.value === 'local' ? currentBookFileName.value : undefined,
+    title: activeBookTitle.value,
+    author: activeBookAuthor.value,
+    cfi,
+    progress,
+    savedAt: now,
+    epubUrl: currentBookEpubUrl.value || undefined,
+    coverUrl: currentBookCover.value || undefined,
+  }
+  upsertHistory(entry)
+}
+
+const openSampleBook = (cfi = '') => {
+  if (importedBookUrl.value) {
+    URL.revokeObjectURL(importedBookUrl.value)
+    importedBookUrl.value = null
+  }
+  const sample = sampleBooks[0]
+  skipNextProgress = true
+  currentBookSource.value = 'sample'
+  currentBookId.value = ''
+  currentBookFileName.value = ''
+  currentBookCover.value = ''
+  currentBookEpubUrl.value = ''
+  pendingInitialCfi.value = cfi
+  activeBookFile.value = sample.file
+  activeBookTitle.value = sample.title
+  activeBookAuthor.value = sample.author
+  activeBookSource.value = sample.source
+  blockedReaderMessage.value = ''
+  blockedReaderUrl.value = ''
+  closeSidebar()
+  scrollToReader()
+}
+
+const restoreHistoryEntry = async (entry: HistoryEntry) => {
+  if (entry.source === 'sample') {
+    openSampleBook(entry.cfi)
+    return
+  }
+  if (entry.source === 'gutenberg' && entry.bookId) {
+    try {
+      const book = await getGutendexBook(entry.bookId)
+      loadGutendexBook(book, entry.cfi)
+    } catch {
+      popularError.value = 'Could not reopen this Gutenberg book.'
+    }
+    return
+  }
+  if (entry.source === 'local' && entry.fileName) {
+    pendingLocalRestore.value = { fileName: entry.fileName, cfi: entry.cfi }
+    closeSidebar()
+    bookInputRef.value?.click()
+  }
+}
+
+const onClearHistory = () => {
+  clearHistory()
 }
 
 const SEARCH_CACHE_LIMIT = 30
@@ -268,6 +364,21 @@ const setImportedBook = (file: File) => {
   if (importedBookUrl.value) URL.revokeObjectURL(importedBookUrl.value)
   const url = URL.createObjectURL(file)
   importedBookUrl.value = url
+
+  if (pendingLocalRestore.value && pendingLocalRestore.value.fileName === file.name) {
+    pendingInitialCfi.value = pendingLocalRestore.value.cfi
+  } else {
+    pendingInitialCfi.value = ''
+  }
+  pendingLocalRestore.value = null
+
+  skipNextProgress = true
+  currentBookSource.value = 'local'
+  currentBookId.value = ''
+  currentBookFileName.value = file.name
+  currentBookCover.value = ''
+  currentBookEpubUrl.value = ''
+
   activeBookFile.value = url
   activeBookTitle.value = file.name.replace(/\.epub$/i, '')
   activeBookAuthor.value = 'Local import'
@@ -583,6 +694,57 @@ onBeforeUnmount(() => {
           </li>
         </ul>
 
+        <div
+          v-if="!sidebarCollapsed && readingHistory.length"
+          class="mt-8"
+        >
+          <p class="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Continue reading
+          </p>
+          <ul class="space-y-1">
+            <li v-for="entry in readingHistory" :key="entryKey(entry)" class="group relative">
+              <button
+                type="button"
+                class="flex w-full items-start gap-2 rounded-md p-2 pr-7 text-left transition-colors hover:bg-gray-800"
+                @click="restoreHistoryEntry(entry)"
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm font-semibold text-white">{{ entry.title }}</span>
+                  <span v-if="entry.author" class="block truncate text-xs text-gray-400">{{ entry.author }}</span>
+                  <span class="mt-1 block">
+                    <span class="inline-flex h-1 w-full overflow-hidden rounded-full bg-gray-700">
+                      <span
+                        class="block h-full rounded-full bg-indigo-500"
+                        :style="{ width: `${Math.round(entry.progress * 100)}%` }"
+                      />
+                    </span>
+                  </span>
+                  <span class="mt-1 block text-[11px] uppercase tracking-wide text-gray-500">
+                    {{ Math.round(entry.progress * 100) }}%
+                    <span v-if="entry.source === 'local'" class="ml-1 text-amber-300/80">· local file</span>
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="absolute right-1 top-1 rounded-md p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-700 hover:text-gray-200 focus:opacity-100 group-hover:opacity-100"
+                :aria-label="`Remove ${entry.title} from history`"
+                @click.stop="removeHistory(entryKey(entry))"
+              >
+                <XMarkIcon class="size-4" aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
+          <button
+            type="button"
+            class="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+            @click="onClearHistory"
+          >
+            <TrashIcon class="size-4" aria-hidden="true" />
+            Clear history
+          </button>
+        </div>
+
         <div v-if="!sidebarCollapsed" class="mt-8 rounded-lg border border-white/10 bg-gray-800/70 p-4">
           <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Mode</p>
           <div class="mt-3 grid grid-cols-2 overflow-hidden rounded-md border border-gray-700">
@@ -647,7 +809,9 @@ onBeforeUnmount(() => {
             :reader-expanded="readerExpanded"
             :blocked-message="blockedReaderMessage"
             :blocked-url="blockedReaderUrl"
+            :initial-cfi="pendingInitialCfi"
             @toggle-expanded="toggleFullscreen"
+            @progress="onReaderProgress"
           />
           <template #fallback>
             <article

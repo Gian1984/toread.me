@@ -44,6 +44,7 @@ type StaticLibraryPayload = {
 
 const LIBRARY_DATA_BASE = '/library-data'
 const BAKED_PAGES = 2
+const LIBRARY_LANG_KEY = 'toread:library-lang'
 
 const categories: LibraryCategory[] = [
   {
@@ -254,13 +255,32 @@ watch(query, () => {
   }, 250)
 })
 
-watch(selectedLanguage, () => {
+watch(selectedLanguage, (val) => {
+  try {
+    window.localStorage.setItem(LIBRARY_LANG_KEY, val)
+  } catch {
+    // Quota or privacy mode: silently ignore.
+  }
   searchResults.value = []
   void reloadLibrary()
   if (query.value.trim()) void searchLibrary()
 })
 
+const readSavedLanguage = (): string | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(LIBRARY_LANG_KEY)
+  } catch {
+    return null
+  }
+}
+
 onMounted(() => {
+  const saved = readSavedLanguage()
+  if (saved && saved !== selectedLanguage.value && languages.some((l) => l.value === saved)) {
+    selectedLanguage.value = saved
+    return
+  }
   void reloadLibrary()
 })
 </script>

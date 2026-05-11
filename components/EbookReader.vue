@@ -14,10 +14,12 @@ const props = defineProps<{
   readerExpanded: boolean
   blockedMessage?: string
   blockedUrl?: string
+  initialCfi?: string
 }>()
 
 const emit = defineEmits<{
   toggleExpanded: []
+  progress: [{ cfi: string, progress: number }]
 }>()
 
 const areaRef = ref<HTMLElement | null>(null)
@@ -88,10 +90,21 @@ const showNext = () => rendition?.next()
 
 const updateLocation = (location: any) => {
   if (!book?.locations || !location?.start?.cfi) return
-  const page = book.locations.locationFromCfi(location.start.cfi)
+  const cfi = location.start.cfi as string
+  const page = book.locations.locationFromCfi(cfi)
   const total = book.locations.length()
   if (typeof page === 'number' && page >= 0) currentPage.value = page + 1
   if (typeof total === 'number' && total > 0) totalPages.value = total
+
+  let progress = 0
+  if (typeof book.locations.percentageFromCfi === 'function') {
+    const p = book.locations.percentageFromCfi(cfi)
+    if (typeof p === 'number' && Number.isFinite(p)) progress = Math.max(0, Math.min(1, p))
+  }
+  if (!progress && typeof total === 'number' && total > 0 && typeof page === 'number') {
+    progress = Math.max(0, Math.min(1, (page + 1) / total))
+  }
+  emit('progress', { cfi, progress })
 }
 
 const destroyReader = () => {
@@ -128,8 +141,11 @@ const loadBook = async () => {
     })
 
     applyTheme()
+    const displayTarget = props.initialCfi && props.initialCfi.length > 0
+      ? props.initialCfi
+      : undefined
     await Promise.race([
-      rendition.display(),
+      rendition.display(displayTarget),
       new Promise((_, reject) => {
         window.setTimeout(() => {
           reject(new Error('The ebook took too long to load. The remote server may be blocking browser access.'))
