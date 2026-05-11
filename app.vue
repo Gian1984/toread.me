@@ -112,7 +112,7 @@ const currentBookEpubUrl = ref<string>('')
 const pendingInitialCfi = ref<string>('')
 const pendingLocalRestore = ref<{ fileName: string, cfi: string } | null>(null)
 let lastProgressSaveAt = 0
-let skipNextProgress = true
+let firstCfiForBook: string | null = null
 const PROGRESS_THROTTLE_MS = 1500
 
 const typefaces = [
@@ -195,7 +195,7 @@ const loadGutendexBook = (book: GutendexBook, initialCfi = '') => {
     URL.revokeObjectURL(importedBookUrl.value)
     importedBookUrl.value = null
   }
-  skipNextProgress = true
+  firstCfiForBook = null
   currentBookSource.value = 'gutenberg'
   currentBookId.value = String(book.id)
   currentBookFileName.value = ''
@@ -233,10 +233,8 @@ const loadRouteBook = async () => {
 
 const onReaderProgress = ({ cfi, progress, page, totalPages }: { cfi: string, progress: number, page: number | null, totalPages: number | null }) => {
   if (!cfi) return
-  if (skipNextProgress) {
-    skipNextProgress = false
-    return
-  }
+  if (firstCfiForBook === null) firstCfiForBook = cfi
+  if (cfi === firstCfiForBook) return
   const now = Date.now()
   if (now - lastProgressSaveAt < PROGRESS_THROTTLE_MS) return
   lastProgressSaveAt = now
@@ -264,7 +262,7 @@ const openSampleBook = (cfi = '') => {
     importedBookUrl.value = null
   }
   const sample = sampleBooks[0]
-  skipNextProgress = true
+  firstCfiForBook = null
   currentBookSource.value = 'sample'
   currentBookId.value = ''
   currentBookFileName.value = ''
@@ -374,7 +372,7 @@ const setImportedBook = (file: File) => {
   }
   pendingLocalRestore.value = null
 
-  skipNextProgress = true
+  firstCfiForBook = null
   currentBookSource.value = 'local'
   currentBookId.value = ''
   currentBookFileName.value = file.name
