@@ -5,7 +5,8 @@
   "scripts": {
     "build": "nuxt build",
     "dev": "NODE_OPTIONS='--experimental-sqlite' nuxt dev",
-    "generate": "nuxt generate",
+    "fetch-library-data": "node scripts/fetch-library-data.mjs",
+    "generate": "npm run fetch-library-data && nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },

@@ -30,7 +30,20 @@ type CategoryState = {
   hasMore: boolean
   isLoading: boolean
   error: string
+  staticLoaded: boolean
 }
+
+type StaticLibraryPayload = {
+  topic: string
+  language: string
+  count: number
+  hasMore: boolean
+  results: GutendexBook[]
+  error?: string
+}
+
+const LIBRARY_DATA_BASE = '/library-data'
+const BAKED_PAGES = 2
 
 const categories: LibraryCategory[] = [
   {
@@ -100,6 +113,7 @@ const categoryState = reactive<Record<string, CategoryState>>(
         hasMore: true,
         isLoading: true,
         error: '',
+        staticLoaded: false,
       },
     ]),
   ) as Record<string, CategoryState>,
@@ -112,6 +126,44 @@ const activeLanguageLabel = computed(
 const visibleBooks = (category: LibraryCategory) =>
   categoryState[category.key].books.slice(0, categoryState[category.key].visible)
 
+const loadStaticCategory = async (category: LibraryCategory): Promise<boolean> => {
+  const state = categoryState[category.key]
+  const url = `${LIBRARY_DATA_BASE}/${selectedLanguage.value}/${category.topic}.json`
+  try {
+    const res = await fetch(url, { cache: 'force-cache' })
+    if (!res.ok) return false
+    const data = (await res.json()) as StaticLibraryPayload
+    if (!Array.isArray(data.results)) return false
+    state.books = data.results
+    state.count = data.count ?? data.results.length
+    state.hasMore = Boolean(data.hasMore)
+    state.page = BAKED_PAGES
+    state.visible = 6
+    state.error = ''
+    state.staticLoaded = true
+    return true
+  } catch {
+    return false
+  }
+}
+
+const loadLiveCategoryPage = async (category: LibraryCategory, page: number) => {
+  const state = categoryState[category.key]
+  const data = await listGutendexBooks({
+    topic: category.topic,
+    languages: selectedLanguage.value,
+    sort: 'popular',
+    page,
+  })
+
+  const existing = new Set(state.books.map((book) => book.id))
+  const nextBooks = (data.results ?? []).filter((book) => !existing.has(book.id))
+  state.books = [...state.books, ...nextBooks]
+  state.count = data.count
+  state.hasMore = Boolean(data.next)
+  state.error = ''
+}
+
 const loadCategory = async (category: LibraryCategory, reset = false) => {
   const state = categoryState[category.key]
   if (state.isLoading && !reset) return
@@ -123,23 +175,15 @@ const loadCategory = async (category: LibraryCategory, reset = false) => {
     state.count = 0
     state.hasMore = true
     state.error = ''
+    state.staticLoaded = false
   }
 
   state.isLoading = true
   try {
-    const data = await listGutendexBooks({
-      topic: category.topic,
-      languages: selectedLanguage.value,
-      sort: 'popular',
-      page: state.page,
-    })
-
-    const existing = new Set(state.books.map((book) => book.id))
-    const nextBooks = (data.results ?? []).filter((book) => !existing.has(book.id))
-    state.books = [...state.books, ...nextBooks]
-    state.count = data.count
-    state.hasMore = Boolean(data.next)
-    state.error = ''
+    const usedStatic = await loadStaticCategory(category)
+    if (!usedStatic) {
+      await loadLiveCategoryPage(category, 1)
+    }
   } catch (error) {
     state.error = (error as Error).message || 'Could not load this category.'
   } finally {
@@ -156,9 +200,16 @@ const loadMore = async (category: LibraryCategory) => {
     return
   }
 
-  state.page += 1
+  state.isLoading = true
   state.visible = nextVisible
-  await loadCategory(category)
+  try {
+    state.page += 1
+    await loadLiveCategoryPage(category, state.page)
+  } catch (error) {
+    state.error = (error as Error).message || 'Could not load more books.'
+  } finally {
+    state.isLoading = false
+  }
 }
 
 const reloadLibrary = async () => {
