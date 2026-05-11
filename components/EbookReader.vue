@@ -19,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   toggleExpanded: []
-  progress: [{ cfi: string, progress: number }]
+  progress: [{ cfi: string, progress: number, page: number | null, totalPages: number | null }]
 }>()
 
 const areaRef = ref<HTMLElement | null>(null)
@@ -104,7 +104,12 @@ const updateLocation = (location: any) => {
   if (!progress && typeof total === 'number' && total > 0 && typeof page === 'number') {
     progress = Math.max(0, Math.min(1, (page + 1) / total))
   }
-  emit('progress', { cfi, progress })
+  emit('progress', {
+    cfi,
+    progress,
+    page: typeof page === 'number' && page >= 0 ? page + 1 : null,
+    totalPages: typeof total === 'number' && total > 0 ? total : null,
+  })
 }
 
 const destroyReader = () => {

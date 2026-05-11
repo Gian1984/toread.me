@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { getCurrentInstance, onMounted, ref } from 'vue'
 
 export type HistorySource = 'sample' | 'gutenberg' | 'local'
 
@@ -10,6 +10,8 @@ export type HistoryEntry = {
   author: string
   cfi: string
   progress: number
+  page?: number
+  totalPages?: number
   savedAt: number
   epubUrl?: string
   coverUrl?: string
@@ -45,6 +47,8 @@ const sanitize = (raw: unknown): HistoryEntry[] => {
       author: typeof e.author === 'string' ? e.author : '',
       cfi: e.cfi,
       progress: typeof e.progress === 'number' ? Math.max(0, Math.min(1, e.progress)) : 0,
+      page: typeof e.page === 'number' && e.page > 0 ? e.page : undefined,
+      totalPages: typeof e.totalPages === 'number' && e.totalPages > 0 ? e.totalPages : undefined,
       savedAt: typeof e.savedAt === 'number' ? e.savedAt : Date.now(),
       epubUrl: typeof e.epubUrl === 'string' ? e.epubUrl : undefined,
       coverUrl: typeof e.coverUrl === 'string' ? e.coverUrl : undefined,
@@ -95,7 +99,11 @@ const clearHistory = () => {
 }
 
 export const useReadingHistory = () => {
-  hydrate()
+  if (getCurrentInstance()) {
+    onMounted(hydrate)
+  } else if (typeof window !== 'undefined') {
+    hydrate()
+  }
   return {
     history,
     upsertHistory,

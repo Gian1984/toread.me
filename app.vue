@@ -231,7 +231,7 @@ const loadRouteBook = async () => {
   }
 }
 
-const onReaderProgress = ({ cfi, progress }: { cfi: string, progress: number }) => {
+const onReaderProgress = ({ cfi, progress, page, totalPages }: { cfi: string, progress: number, page: number | null, totalPages: number | null }) => {
   if (!cfi) return
   if (skipNextProgress) {
     skipNextProgress = false
@@ -249,6 +249,8 @@ const onReaderProgress = ({ cfi, progress }: { cfi: string, progress: number }) 
     author: activeBookAuthor.value,
     cfi,
     progress,
+    page: typeof page === 'number' && page > 0 ? page : undefined,
+    totalPages: typeof totalPages === 'number' && totalPages > 0 ? totalPages : undefined,
     savedAt: now,
     epubUrl: currentBookEpubUrl.value || undefined,
     coverUrl: currentBookCover.value || undefined,
@@ -720,6 +722,8 @@ onBeforeUnmount(() => {
                     </span>
                   </span>
                   <span class="mt-1 block text-[11px] uppercase tracking-wide text-gray-500">
+                    <span v-if="entry.page && entry.totalPages">Page {{ entry.page }} / {{ entry.totalPages }} ·</span>
+                    <span v-else-if="entry.page">Page {{ entry.page }} ·</span>
                     {{ Math.round(entry.progress * 100) }}%
                     <span v-if="entry.source === 'local'" class="ml-1 text-amber-300/80">· local file</span>
                   </span>
